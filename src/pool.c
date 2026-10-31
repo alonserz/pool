@@ -34,6 +34,8 @@ typedef struct {
     Vector2 velocity;
     Trace trace;
     Color color;
+    float radius;
+    float mass;
 } Ball;
 
 typedef struct {
@@ -54,6 +56,11 @@ typedef struct {
     size_t count;
 } PointsTrace;
 
+typedef struct {
+    Vector2 v1;
+    Vector2 v2;
+} ElasticCollisionVelocities;
+
 void moveBall(Ball *ball)
 {
     ball->coords.x += ball->velocity.x * 1/FPS;
@@ -65,6 +72,11 @@ int randomValue(int rand_max)
     return rand() % (2 * rand_max) - rand_max; 
 }
 
+int randomValuePositive(size_t rand_max, size_t coef)
+{
+    return rand() % rand_max + coef; 
+}
+
 Vector2 calculate_ball_reflect(Vector2 point1, Vector2 point2, Vector2 ball_velocity)
 {
     Vector2 normal = Vector2Subtract(point2, point1);
@@ -72,6 +84,35 @@ Vector2 calculate_ball_reflect(Vector2 point1, Vector2 point2, Vector2 ball_velo
     Vector2 reflect = Vector2Reflect(ball_velocity, perp_vector);
 
     return reflect;
+}
+
+// https://en.wikipedia.org/wiki/Elastic_collision#Two-dimensional_collision_with_two_moving_objects 
+// check angle-free formula
+ElasticCollisionVelocities elastic_collision(Ball *ball1, Ball *ball2)
+{
+    Vector2 v1 = { 0 };
+    Vector2 v2 = { 0 };
+    ElasticCollisionVelocities pair = { 0 };
+
+    size_t m1 = ball1->mass;
+    size_t m2 = ball2->mass;
+
+    float dot_product1 = (ball1->velocity.x - ball2->velocity.x) * (ball1->coords.x - ball2->coords.x);
+    v1.x = ball1->velocity.x - (2 * m2)/(m1 + m2) * (dot_product1)/((ball1->coords.x - ball2->coords.x)*(ball1->coords.x - ball2->coords.x)) * (ball1->coords.x - ball2->coords.x);
+
+    float dot_product2 = (ball1->velocity.y - ball2->velocity.y) * (ball1->coords.y - ball2->coords.y);
+    v1.y = ball1->velocity.y - (2 * m2)/(m1 + m2) * (dot_product2)/((ball1->coords.y - ball2->coords.y)*(ball1->coords.y - ball2->coords.y)) * (ball1->coords.y - ball2->coords.y);
+
+    float dot_product3 = (ball2->velocity.x - ball1->velocity.x) * (ball2->coords.x - ball1->coords.x);
+    v2.x = ball2->velocity.x - (2 * m2)/(m1 + m2) * (dot_product3)/((ball2->coords.x - ball1->coords.x)*(ball2->coords.x - ball1->coords.x)) * (ball2->coords.x - ball1->coords.x);
+
+    float dot_product4 = (ball2->velocity.y - ball1->velocity.y) * (ball2->coords.y - ball1->coords.y);
+    v2.y = ball2->velocity.y - (2 * m2)/(m1 + m2) * (dot_product4)/((ball2->coords.y - ball1->coords.y)*(ball2->coords.y - ball1->coords.y)) * (ball2->coords.y - ball1->coords.y);
+
+    pair.v1 = v1;
+    pair.v2 = v2;
+
+    return pair;
 }
 
 int main(void)
@@ -123,10 +164,18 @@ int main(void)
 	    if (chosen_idx >= 0) {
 		DrawText(TextFormat("vx: %f", balls.items[chosen_idx].velocity.x), WIDTH - 100, 0, 10, BLACK);
 		DrawText(TextFormat("vy: %f", balls.items[chosen_idx].velocity.y), WIDTH - 100, 10, 10, BLACK);
+		DrawText(TextFormat("radius: %f", balls.items[chosen_idx].radius), WIDTH - 100, 20, 10, BLACK);
+		DrawText(TextFormat("mass: %f", balls.items[chosen_idx].mass), WIDTH - 100, 30, 10, BLACK);
 	    }
 
 	    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-		Ball ball = { .coords = GetMousePosition(), .velocity = { .x = randomValue(100), .y = randomValue(100) }, .color = BLACK };
+		Ball ball = {
+		    .coords = GetMousePosition(),
+		    .velocity = { .x = randomValue(100), .y = randomValue(100) },
+		    .color = BLACK,
+		    .radius = randomValuePositive(5, 5),
+		    .mass = randomValuePositive(100, 10),
+		};
 		da_append(&balls, ball);
 	    }
 
@@ -136,10 +185,10 @@ int main(void)
 	
 	    for (size_t i = 0; i < balls.count; i++) {
 		// draw balls 
-		DrawCircleV(balls.items[i].coords, RADIUS, balls.items[i].color);
+		DrawCircleV(balls.items[i].coords, balls.items[i].radius, balls.items[i].color);
 
 		if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {
-		    if (CheckCollisionCircles(GetMousePosition(), RADIUS, balls.items[i].coords, RADIUS)) {
+		    if (CheckCollisionCircles(GetMousePosition(), RADIUS, balls.items[i].coords, balls.items[i].radius)) {
 			chosen_idx = i;
 			balls.items[i].color = BLUE;
 		    } else {
@@ -152,7 +201,7 @@ int main(void)
 		// check collision with walls
 		if (poly.count >= 2) {
 		    for (size_t j = 0; j < poly.count - 1; j++) {
-			if (!CheckCollisionCircleLine(balls.items[i].coords, RADIUS, poly.items[j], poly.items[j + 1])) continue; 
+			if (!CheckCollisionCircleLine(balls.items[i].coords, balls.items[i].radius, poly.items[j], poly.items[j + 1])) continue; 
 			balls.items[i].velocity = calculate_ball_reflect(poly.items[j], poly.items[j + 1], balls.items[i].velocity);
 		    }
 		}
@@ -163,36 +212,12 @@ int main(void)
 			// self-collision case
 			if (j == i) continue;
 			if (had_collision >= 0 && had_collision == i) continue;
-			if (!CheckCollisionCircles(balls.items[i].coords, RADIUS, balls.items[j].coords, RADIUS)) continue;
+			if (!CheckCollisionCircles(balls.items[i].coords, balls.items[i].radius, balls.items[j].coords, balls.items[j].radius)) continue;
 			// calc reflect for the first ball
-			balls.items[i].velocity = calculate_ball_reflect(balls.items[i].coords, balls.items[j].coords, balls.items[i].velocity);
-			balls.items[j].velocity = calculate_ball_reflect(balls.items[j].coords, balls.items[i].coords, balls.items[j].velocity);
+			ElasticCollisionVelocities pair = elastic_collision(&balls.items[i], &balls.items[j]);
 
-			had_collision = j;
-
-			if (balls.items[j].velocity.x < 0) {
-			    balls.items[j].velocity.x -= balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			} else {
-			    balls.items[j].velocity.x += balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			}
-
-			if (balls.items[j].velocity.y < 0) {
-			    balls.items[j].velocity.y -= balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			} else {
-			    balls.items[j].velocity.y += balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			}
-
-			if (balls.items[i].velocity.x > 0) {
-			    balls.items[i].velocity.x -= balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			} else {
-			    balls.items[i].velocity.x += balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			}
-
-			if (balls.items[i].velocity.y > 0) {
-			    balls.items[i].velocity.y -= balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			} else {
-			    balls.items[i].velocity.y += balls.items[i].velocity.x / PERCENT_ENERGY_LEFT_ON_HIT;
-			}
+			balls.items[i].velocity = pair.v1;
+			balls.items[j].velocity = pair.v2;
 		    }
 		}
 
