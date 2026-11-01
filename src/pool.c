@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include "raymath.h"
 #include <math.h>
+#include <string.h>
 
 #define WIDTH 800
 #define HEIGHT 800
@@ -115,11 +116,60 @@ ElasticCollisionVelocities elastic_collision(Ball *ball1, Ball *ball2)
     return pair;
 }
 
-int main(void)
+void save_poly(FILE *stream, Poly *poly)
+{
+    for (size_t i = 0; i < poly->count; i++) {
+	fprintf(stream, "%f %f\n", poly->items[i].x, poly->items[i].y);
+    }
+
+    printf("%s\n", "Wrote data to file");
+}
+
+void read_poly(FILE *stream, Poly *poly)
+{
+    char* line = NULL;
+    size_t n = 0;
+    ssize_t read;
+    size_t counter = 0;
+
+    while ((read = getline(&line, &n, stream)) != -1) {
+	line[strlen(line) - 1] = '\0';
+
+	Vector2 point = {0};
+
+	char* token = strtok(line, " ");
+	while (token != NULL) {
+	    if (counter % 2 == 0) {
+		point.x = strtof(token, NULL);
+	    } else {
+		point.y = strtof(token, NULL);
+	    }
+	    token = strtok(NULL, " ");
+	    counter++;
+	}
+
+	da_append(poly, point);
+	free(token);
+    }
+
+    free(line);
+}
+
+int main(int argc, char **argv)
 {
     srand(time(NULL));
     Balls balls = {0};
     Poly poly = {0};
+
+    if (argc > 1) {
+	char *filepath = argv[1];
+	FILE *stream = fopen(filepath, "r");
+
+	read_poly(stream, &poly);
+	fclose(stream);
+    }
+
+    
     InitWindow(WIDTH, HEIGHT, "raylib example - basic window");
     SetTargetFPS(FPS);
     bool drawTrace = false;
@@ -147,6 +197,12 @@ int main(void)
 
 	    if (IsKeyPressed(KEY_J)) {
 		ballsCollision = !ballsCollision;
+	    }
+
+	    if (IsKeyPressed(KEY_H)) {
+		FILE *stream = fopen("./levels/level.txt", "w+");
+		save_poly(stream, &poly);
+		fclose(stream);
 	    }
 
 	    if (drawTrace) {
